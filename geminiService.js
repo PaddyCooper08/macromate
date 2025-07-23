@@ -14,6 +14,54 @@ const genAI = new GoogleGenAI({apiKey: process.env.GEMINI_API_KEY});
  * @param {string} foodDescription - Description of the food consumed
  * @returns {Object} Object containing protein_g, carbs_g, fats_g, and parsed_food_item
  */
+async function calculateImageMacros(contents) {
+  const response = await genAI.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: contents,
+  });
+  const text = response.text;
+  
+  // Try to parse the JSON response
+  let macroData;
+  try {
+    // Clean the response text to extract JSON
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('No JSON object found in response');
+    }
+    
+    macroData = JSON.parse(jsonMatch[0]);
+    
+    // Validate required fields
+    if (typeof macroData.protein_g !== 'number' || 
+        typeof macroData.carbs_g !== 'number' || 
+        typeof macroData.fats_g !== 'number' ||
+        typeof macroData.calories !== 'number' ||
+        typeof macroData.parsed_food_item !== 'string') {
+      throw new Error('Invalid JSON structure');
+    }
+
+    // Ensure non-negative values
+    macroData.protein_g = Math.max(0, parseFloat(macroData.protein_g) || 0);
+    macroData.carbs_g = Math.max(0, parseFloat(macroData.carbs_g) || 0);
+    macroData.fats_g = Math.max(0, parseFloat(macroData.fats_g) || 0);
+
+  } catch (parseError) {
+    console.error('Failed to parse Gemini response:', text);
+    console.error('Parse error:', parseError);
+    
+    // Fallback response
+    macroData = {
+      protein_g: 0,
+      carbs_g: 0,
+      fats_g: 0,
+      calories: 0,
+      parsed_food_item: contents // Note: using 'contents' parameter instead of undefined 'foodDescription'
+    };
+  }
+
+  return macroData;
+}
 async function calculateMacros(foodDescription) {
     try {
       const prompt = `You are a nutrition expert. Analyze the following food description and calculate the approximate macronutrients.
@@ -42,7 +90,7 @@ Output: {"protein_g": 31.0, "carbs_g": 0.0, "fats_g": 3.6, "parsed_food_item": "
 
 Now analyze: "${foodDescription}"`;
 
-      const response = await genAI.models.generateContent({
+    const response = await genAI.models.generateContent({
     model: 'gemini-2.5-flash',
     contents: prompt,
   });
@@ -116,4 +164,4 @@ async function testService() {
   }
 }
 
-export { calculateMacros, testService };
+export { calculateMacros, testService, calculateImageMacros };

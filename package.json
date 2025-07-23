@@ -2,11 +2,11 @@
   "name": "macromate-telegram-bot",
   "version": "1.0.0",
   "description": "A Telegram bot for tracking nutrition macros using Gemini Flash and Supabase",
-  "main": "src/bot.js",
+  "main": "bot.js",
   "type": "module",
   "scripts": {
-    "start": "node src/bot.js",
-    "dev": "nodemon src/bot.js"
+    "start": "node bot.js",
+    "dev": "nodemon bot.js"
   },
   "author": "Your Name",
   "license": "MIT",
