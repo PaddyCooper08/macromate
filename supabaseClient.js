@@ -1,5 +1,5 @@
-const dotenv = await import('dotenv');
-const { createClient } = await import('@supabase/supabase-js');
+import dotenv from 'dotenv';
+import { createClient } from '@supabase/supabase-js';
 dotenv.config();
 // Initialize Supabase client
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
@@ -159,4 +159,111 @@ async function saveMacrosToDb(userId, date, mealTime, foodItem, protein, carbs, 
     }
   }
 
-export { saveMacrosToDb, getDailyMacros, getPreviousDaysMacros, deleteMacroLog };
+  /**
+   * Save a food item to user's favorites
+   * @param {string} userId - Telegram user ID
+   * @param {string} foodItem - Description of the food item
+   * @param {number} protein - Protein in grams
+   * @param {number} carbs - Carbohydrates in grams
+   * @param {number} fats - Fats in grams
+   * @param {number} calories - Calories
+   */
+  async function saveFavoriteFood(userId, foodItem, protein, carbs, fats, calories) {
+    try {
+      // Check if this food item already exists as a favorite for this user
+      const { data: existingFavorite, error: checkError } = await supabase
+        .from('favorite_foods')
+        .select('id')
+        .eq('user_id', userId.toString())
+        .eq('food_item', foodItem)
+        .limit(1);
+
+      if (checkError) {
+        console.error('Supabase check error:', checkError);
+        throw new Error(`Failed to check existing favorites: ${checkError.message}`);
+      }
+
+      if (existingFavorite && existingFavorite.length > 0) {
+        throw new Error('This food item is already in your favorites!');
+      }
+
+      const { data, error } = await supabase
+        .from('favorite_foods')
+        .insert([
+          {
+            user_id: userId.toString(),
+            food_item: foodItem,
+            protein_g: parseFloat(protein.toFixed(1)),
+            carbs_g: parseFloat(carbs.toFixed(1)),
+            fats_g: parseFloat(fats.toFixed(1)),
+            calories: parseFloat(calories.toFixed(1))
+          }
+        ])
+        .select();
+
+      if (error) {
+        console.error('Supabase insert error:', error);
+        throw new Error(`Failed to save favorite food: ${error.message}`);
+      }
+
+      return data[0];
+    } catch (error) {
+      console.error('Error saving favorite food to DB:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all favorite foods for a user
+   * @param {string} userId - Telegram user ID
+   */
+  async function getFavoriteFoods(userId) {
+    try {
+      const { data, error } = await supabase
+        .from('favorite_foods')
+        .select('*')
+        .eq('user_id', userId.toString())
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Supabase select error:', error);
+        throw new Error(`Failed to retrieve favorite foods: ${error.message}`);
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error getting favorite foods:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a favorite food item from the database
+   * @param {string} favoriteId - The UUID of the favorite food to delete
+   * @param {string} userId - The Telegram user ID to ensure ownership
+   * @returns {Object} The deleted data
+   */
+  async function deleteFavoriteFood(favoriteId, userId) {
+    try {
+      const { data, error } = await supabase
+        .from('favorite_foods')
+        .delete()
+        .match({ id: favoriteId, user_id: userId.toString() })
+        .select();
+
+      if (error) {
+        console.error('Supabase delete error:', error);
+        throw new Error(`Failed to delete favorite food: ${error.message}`);
+      }
+      if (data.length === 0) {
+        throw new Error('Favorite food not found or user does not have permission to delete.');
+      }
+
+      return data[0];
+    } catch (error) {
+      console.error('Error deleting favorite food from DB:', error);
+      throw error;
+    }
+  }
+
+export { saveMacrosToDb, getDailyMacros, getPreviousDaysMacros, deleteMacroLog, saveFavoriteFood, getFavoriteFoods, deleteFavoriteFood };
