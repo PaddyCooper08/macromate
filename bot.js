@@ -470,6 +470,70 @@ Use /todaymacros to see your daily summary!`;
         text: "Error removing from favourites.",
       });
     }
+  } else if (data.startsWith("show_meals_")) {
+    const parts = data.split("_");
+    const targetChatId = parts[2];
+    const date = parts[3];
+    
+    try {
+      const dailyMacros = await getDailyMacros(targetChatId, date);
+      
+      if (dailyMacros.length === 0) {
+        bot.answerCallbackQuery(callbackQuery.id, {
+          text: "No meals found for this date.",
+        });
+        return;
+      }
+
+      // Calculate totals for the summary
+      let totalProtein = 0;
+      let totalCarbs = 0;
+      let totalFats = 0;
+      let totalCalories = 0;
+
+      dailyMacros.forEach((entry) => {
+        totalProtein += parseFloat(entry.protein_g || 0);
+        totalCarbs += parseFloat(entry.carbs_g || 0);
+        totalFats += parseFloat(entry.fats_g || 0);
+        totalCalories += parseFloat(entry.calories || 0);
+      });
+
+      // Create message with totals and individual meals
+      let mealsText = `*Daily Summary - ${date}*
+
+*TOTALS*
+🥩 Protein: ${totalProtein.toFixed(1)}g
+🍞 Carbs: ${totalCarbs.toFixed(1)}g  
+🥑 Fats: ${totalFats.toFixed(1)}g
+🔥 Calories: ${totalCalories.toFixed(1)}
+
+*Individual Meals*
+
+`;
+      
+      dailyMacros.forEach((entry) => {
+        const mealTime = new Date(entry.meal_time);
+        const timeString = mealTime.toLocaleTimeString("en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        });
+
+        mealsText += `${timeString} - ${entry.food_item}\n${entry.calories} cal, ${entry.protein_g}g protein\n\n`;
+      });
+
+      bot.answerCallbackQuery(callbackQuery.id);
+      bot.editMessageText(mealsText, {
+        chat_id: chatId,
+        message_id: msg.message_id,
+        parse_mode: "Markdown"
+      });
+    } catch (error) {
+      console.error("Error showing individual meals:", error);
+      bot.answerCallbackQuery(callbackQuery.id, {
+        text: "Error loading meals.",
+      });
+    }
   }
 });
 
@@ -561,7 +625,7 @@ async function handleTodayMacros(chatId) {
     if (dailyMacros.length === 0) {
       bot.sendMessage(
         chatId,
-        '📊 No food entries logged for today yet!\n\nStart by sending me what you\'ve eaten, for example:\n"100g oatmeal with banana"'
+        'No food entries logged for today yet!\n\nStart by sending me what you\'ve eaten, for example:\n"100g oatmeal with banana"'
       );
       return;
     }
@@ -579,31 +643,27 @@ async function handleTodayMacros(chatId) {
       totalCalories += parseFloat(entry.calories || 0);
     });
 
-    // Format meals list (only show calories and protein for individual meals)
-    let mealsText = "";
-    dailyMacros.forEach((entry) => {
-      const mealTime = new Date(entry.meal_time);
-      const timeString = mealTime.toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      });
+    const summaryMessage = `*Daily Summary - ${today}*
 
-      mealsText += `🕐 ${timeString} - ${entry.food_item}\n   📊 ${entry.calories} cal • ${entry.protein_g}g protein\n\n`;
-    });
-
-    const summaryMessage = `📊 *Daily Summary - ${today}*
-
-🎯 *TOTALS*
-💪 Protein: ${totalProtein.toFixed(1)}g
+*TOTALS*
+🥩 Protein: ${totalProtein.toFixed(1)}g
 🍞 Carbs: ${totalCarbs.toFixed(1)}g  
 🥑 Fats: ${totalFats.toFixed(1)}g
-🔥 Calories: ${totalCalories.toFixed(1)}
+🔥 Calories: ${totalCalories.toFixed(1)}`;
 
-🍽 *MEALS*
-${mealsText}Keep crushing it! 💪`;
+    const keyboard = {
+      inline_keyboard: [[
+        {
+          text: "Show Individual Meals",
+          callback_data: `show_meals_${chatId}_${today}`
+        }
+      ]]
+    };
 
-    bot.sendMessage(chatId, summaryMessage, { parse_mode: "Markdown" });
+    bot.sendMessage(chatId, summaryMessage, { 
+      parse_mode: "Markdown",
+      reply_markup: keyboard 
+    });
   } catch (error) {
     console.error("Error getting daily macros:", error);
     throw error;
