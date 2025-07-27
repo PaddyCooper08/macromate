@@ -67,7 +67,7 @@ async function calculateMacros(foodDescription) {
       const prompt = `You are a nutrition expert. Analyze the following food description and calculate the approximate macronutrients.
 
 IMPORTANT: Respond ONLY with a valid JSON object in the exact format specified below. Do not include any additional text, markdown formatting, or explanations.
-
+All food is from the uk and when a brand is mentioned you need to use google search to locate the nutritional information online if possible. If exact information is not avaialble, use reasonable estimates based on common nutritional values, use the lower bound of protein content ensuring you do not overshoot protein values.
 Food description: "${foodDescription}"
 
 Analyze this food description and provide the macronutrient breakdown. If quantities are not specified, assume reasonable serving sizes. If you cannot identify the food or calculate macros, return zeros.

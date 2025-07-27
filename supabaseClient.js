@@ -159,4 +159,112 @@ async function saveMacrosToDb(userId, date, mealTime, foodItem, protein, carbs, 
     }
   }
 
-export { saveMacrosToDb, getDailyMacros, getPreviousDaysMacros, deleteMacroLog };
+  /**
+   * Save a food item to favorites
+   * @param {string} userId - Telegram user ID
+   * @param {string} foodItem - Description of the food item
+   * @param {number} protein - Protein in grams
+   * @param {number} carbs - Carbohydrates in grams
+   * @param {number} fats - Fats in grams
+   * @param {number} calories - Calories
+   */
+  async function saveFavoriteItem(userId, foodItem, protein, carbs, fats, calories) {
+    try {
+      // Check if item already exists in favorites
+      const { data: existing, error: checkError } = await supabase
+        .from('favorite_foods')
+        .select('id')
+        .eq('user_id', userId.toString())
+        .eq('food_item', foodItem)
+        .single();
+
+      if (checkError && checkError.code !== 'PGRST116') { // PGRST116 = no rows returned
+        console.error('Error checking existing favorite:', checkError);
+        throw new Error(`Failed to check existing favorite: ${checkError.message}`);
+      }
+
+      if (existing) {
+        throw new Error('This item is already in your favorites!');
+      }
+
+      const { data, error } = await supabase
+        .from('favorite_foods')
+        .insert([
+          {
+            user_id: userId.toString(),
+            food_item: foodItem,
+            protein_g: parseFloat(protein.toFixed(1)),
+            carbs_g: parseFloat(carbs.toFixed(1)),
+            fats_g: parseFloat(fats.toFixed(1)),
+            calories: parseFloat(calories.toFixed(1)),
+            created_at: new Date().toISOString()
+          }
+        ])
+        .select();
+
+      if (error) {
+        console.error('Supabase insert error:', error);
+        throw new Error(`Failed to save favorite item: ${error.message}`);
+      }
+
+      return data[0];
+    } catch (error) {
+      console.error('Error saving favorite item:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all favorite foods for a user
+   * @param {string} userId - Telegram user ID
+   */
+  async function getFavoriteItems(userId) {
+    try {
+      const { data, error } = await supabase
+        .from('favorite_foods')
+        .select('*')
+        .eq('user_id', userId.toString())
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Supabase select error:', error);
+        throw new Error(`Failed to retrieve favorite items: ${error.message}`);
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error getting favorite items:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a favorite food item
+   * @param {string} favoriteId - The UUID of the favorite item to delete
+   * @param {string} userId - The Telegram user ID to ensure ownership
+   */
+  async function deleteFavoriteItem(favoriteId, userId) {
+    try {
+      const { data, error } = await supabase
+        .from('favorite_foods')
+        .delete()
+        .match({ id: favoriteId, user_id: userId.toString() })
+        .select();
+
+      if (error) {
+        console.error('Supabase delete error:', error);
+        throw new Error(`Failed to delete favorite item: ${error.message}`);
+      }
+
+      if (data.length === 0) {
+        throw new Error('Favorite item not found or user does not have permission to delete.');
+      }
+
+      return data[0];
+    } catch (error) {
+      console.error('Error deleting favorite item:', error);
+      throw error;
+    }
+  }
+
+export { saveMacrosToDb, getDailyMacros, getPreviousDaysMacros, deleteMacroLog, saveFavoriteItem, getFavoriteItems, deleteFavoriteItem };

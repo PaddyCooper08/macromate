@@ -7,6 +7,9 @@ import {
   getDailyMacros,
   getPreviousDaysMacros,
   deleteMacroLog,
+  saveFavoriteItem,
+  getFavoriteItems,
+  deleteFavoriteItem,
 } from "./supabaseClient.js";
 import { calculateMacros, testService, calculateImageMacros } from "./geminiService.js";
 
@@ -33,6 +36,8 @@ I'll help you track your daily nutrition macros using AI-powered food analysis.
 *Commands:*
 /todaymacros - View today's macro summary and meals
 /pastmacros [days] - View past daily macros (default: 3 days)
+/favorites - View and add from your favorite foods
+/managefavorites - Remove items from your favorites
 /start - Show this welcome message
 
 *Example:*
@@ -78,6 +83,32 @@ bot.onText(/\/r/, async (msg) => {
     await handleRemove(chatId);
   } catch (error) {
     console.error("Error in remove command:", error);
+    bot.sendMessage(
+      chatId,
+      "❌ Sorry, I encountered an error. Please try again later."
+    );
+  }
+});
+
+bot.onText(/\/favorites/, async (msg) => {
+  const chatId = msg.chat.id;
+  try {
+    await handleFavorites(chatId);
+  } catch (error) {
+    console.error("Error in favorites command:", error);
+    bot.sendMessage(
+      chatId,
+      "❌ Sorry, I encountered an error retrieving your favorites. Please try again later."
+    );
+  }
+});
+
+bot.onText(/\/managefavorites/, async (msg) => {
+  const chatId = msg.chat.id;
+  try {
+    await handleManageFavorites(chatId);
+  } catch (error) {
+    console.error("Error in manage favorites command:", error);
     bot.sendMessage(
       chatId,
       "❌ Sorry, I encountered an error. Please try again later."
@@ -184,7 +215,19 @@ Now analyze the image with weight: "${weight}"`;
 
 Use /todaymacros to see your daily summary!`;
 
-          bot.sendMessage(chatId, confirmationMessage, { parse_mode: "Markdown" });
+          const keyboard = {
+            inline_keyboard: [[
+              {
+                text: "⭐ Add to Favorites",
+                callback_data: `save_favorite_${macroData.protein_g}_${macroData.carbs_g}_${macroData.fats_g}_${macroData.calories}_${macroData.parsed_food_item.replace(/ /g, "SPACE")}`
+              }
+            ]]
+          };
+
+          bot.sendMessage(chatId, confirmationMessage, { 
+            parse_mode: "Markdown",
+            reply_markup: keyboard 
+          });
         } catch (error) {
           console.error("Error processing nutrition label:", error);
           bot.sendMessage(
@@ -250,6 +293,96 @@ bot.on("callback_query", async (callbackQuery) => {
         "❌ Failed to remove the meal. It might have been already deleted."
       );
     }
+  } else if (data.startsWith("add_favorite_")) {
+    const favoriteId = data.split("_")[2];
+    try {
+      const favorites = await getFavoriteItems(userId);
+      const favorite = favorites.find(f => f.id === favoriteId);
+      
+      if (!favorite) {
+        bot.answerCallbackQuery(callbackQuery.id, {
+          text: "Favorite item not found.",
+        });
+        return;
+      }
+
+      // Save to macro log
+      const now = new Date();
+      const date = now.toISOString().split("T")[0];
+      const mealTime = now.toISOString();
+
+      await saveMacrosToDb(
+        userId,
+        date,
+        mealTime,
+        favorite.food_item,
+        favorite.protein_g,
+        favorite.carbs_g,
+        favorite.fats_g,
+        favorite.calories
+      );
+
+      bot.answerCallbackQuery(callbackQuery.id, {
+        text: "Added to today's meals!",
+      });
+
+      const confirmationMessage = `✅ *Added from favorites!*
+
+📝 *Food:* ${favorite.food_item}
+📊 *Macros:* P: ${favorite.protein_g}g | C: ${favorite.carbs_g}g | F: ${favorite.fats_g}g | Cal: ${favorite.calories}
+
+Use /todaymacros to see your daily summary!`;
+
+      bot.sendMessage(chatId, confirmationMessage, { parse_mode: "Markdown" });
+    } catch (error) {
+      console.error("Error adding favorite to meals:", error);
+      bot.answerCallbackQuery(callbackQuery.id, {
+        text: "Error adding to meals.",
+      });
+    }
+  } else if (data.startsWith("save_favorite_")) {
+    const parts = data.split("_");
+    const protein = parseFloat(parts[2]);
+    const carbs = parseFloat(parts[3]);
+    const fats = parseFloat(parts[4]);
+    const calories = parseFloat(parts[5]);
+    const foodItem = parts.slice(6).join("_").replace(/SPACE/g, " ");
+
+    try {
+      await saveFavoriteItem(userId, foodItem, protein, carbs, fats, calories);
+      bot.answerCallbackQuery(callbackQuery.id, {
+        text: "Added to favorites! ⭐",
+      });
+      bot.editMessageReplyMarkup(
+        { inline_keyboard: [] },
+        {
+          chat_id: chatId,
+          message_id: msg.message_id,
+        }
+      );
+    } catch (error) {
+      console.error("Error saving to favorites:", error);
+      bot.answerCallbackQuery(callbackQuery.id, {
+        text: error.message.includes("already in") ? "Already in favorites!" : "Error saving to favorites.",
+      });
+    }
+  } else if (data.startsWith("delete_favorite_")) {
+    const favoriteId = data.split("_")[2];
+    try {
+      await deleteFavoriteItem(favoriteId, userId);
+      bot.answerCallbackQuery(callbackQuery.id, {
+        text: "Removed from favorites!",
+      });
+      bot.editMessageText("✅ Item has been removed from favorites.", {
+        chat_id: chatId,
+        message_id: msg.message_id,
+      });
+    } catch (error) {
+      console.error("Error removing favorite:", error);
+      bot.answerCallbackQuery(callbackQuery.id, {
+        text: "Error removing from favorites.",
+      });
+    }
   }
 });
 
@@ -291,7 +424,7 @@ async function handleFoodEntry(chatId, foodDescription) {
       macroData.calories
     );
 
-    // Send confirmation message
+    // Send confirmation message with add to favorites option
     const confirmationMessage = `✅ *Logged successfully!*
 
 📝 *Food:* ${macroData.parsed_food_item}
@@ -299,7 +432,19 @@ async function handleFoodEntry(chatId, foodDescription) {
 
 Use /todaymacros to see your daily summary!`;
 
-    bot.sendMessage(chatId, confirmationMessage, { parse_mode: "Markdown" });
+    const keyboard = {
+      inline_keyboard: [[
+        {
+          text: "⭐ Add to Favorites",
+          callback_data: `save_favorite_${macroData.protein_g}_${macroData.carbs_g}_${macroData.fats_g}_${macroData.calories}_${macroData.parsed_food_item.replace(/ /g, "SPACE")}`
+        }
+      ]]
+    };
+
+    bot.sendMessage(chatId, confirmationMessage, { 
+      parse_mode: "Markdown",
+      reply_markup: keyboard 
+    });
   } catch (error) {
     console.error("Error processing food entry:", error);
     bot.sendMessage(
@@ -449,6 +594,74 @@ async function handleRemove(chatId) {
   } catch (error) {
     console.error("Error in handleRemove:", error);
     bot.sendMessage(chatId, "❌ An error occurred while fetching your meals.");
+  }
+}
+
+// Handle favorites command
+async function handleFavorites(chatId) {
+  bot.sendChatAction(chatId, "typing");
+
+  try {
+    const favorites = await getFavoriteItems(chatId);
+
+    if (favorites.length === 0) {
+      bot.sendMessage(
+        chatId,
+        "⭐ You don't have any favorite foods yet!\n\nLog some food items and use the ⭐ Add to Favorites button to build your favorites list."
+      );
+      return;
+    }
+
+    const keyboard = {
+      inline_keyboard: favorites.map((favorite) => [
+        {
+          text: `${favorite.food_item} (${favorite.calories} cal, ${favorite.protein_g}g protein)`,
+          callback_data: `add_favorite_${favorite.id}`,
+        }
+      ])
+    };
+
+    bot.sendMessage(chatId, "⭐ *Your Favorite Foods*\n\nTap any item to add it to today's meals:", {
+      parse_mode: "Markdown",
+      reply_markup: keyboard
+    });
+  } catch (error) {
+    console.error("Error in handleFavorites:", error);
+    throw error;
+  }
+}
+
+// Handle manage favorites command
+async function handleManageFavorites(chatId) {
+  bot.sendChatAction(chatId, "typing");
+
+  try {
+    const favorites = await getFavoriteItems(chatId);
+
+    if (favorites.length === 0) {
+      bot.sendMessage(
+        chatId,
+        "⭐ You don't have any favorite foods to manage yet!\n\nLog some food items and use the ⭐ Add to Favorites button to build your favorites list."
+      );
+      return;
+    }
+
+    const keyboard = {
+      inline_keyboard: favorites.map((favorite) => [
+        {
+          text: `🗑️ ${favorite.food_item}`,
+          callback_data: `delete_favorite_${favorite.id}`,
+        }
+      ])
+    };
+
+    bot.sendMessage(chatId, "🗑️ *Manage Favorites*\n\nTap any item to remove it from your favorites:", {
+      parse_mode: "Markdown",
+      reply_markup: keyboard
+    });
+  } catch (error) {
+    console.error("Error in handleManageFavorites:", error);
+    throw error;
   }
 }
 
